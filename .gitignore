@@ -1,0 +1,20 @@
+# Python
+__pycache__/
+*.pyc
+venv/
+.venv/
+
+# Datos descargados y generados (se regeneran con el código)
+cache/
+data/
+*.fits
+*.part
+
+# Editor y sistema
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Secretos
+.env

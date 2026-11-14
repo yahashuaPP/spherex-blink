@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SPHEREx Blink</title>
+<style>
+  body { font-family: system-ui, sans-serif; background: #0b0e14; color: #e6e6e6; margin: 0; padding: 24px; }
+  h1 { margin: 0 0 4px; font-size: 22px; }
+  .sub { color: #8a93a3; margin-bottom: 18px; }
+  .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 12px; }
+  input, select, button { background: #161b24; color: #e6e6e6; border: 1px solid #2c3442; border-radius: 6px; padding: 7px 10px; font-size: 14px; }
+  input[type=text] { width: 130px; } #name { width: 170px; }
+  button { cursor: pointer; } button.on { background: #2b5fd9; border-color: #2b5fd9; }
+  #view { display: flex; gap: 20px; flex-wrap: wrap; margin-top: 8px; }
+  figure { margin: 0; } figcaption { color: #8a93a3; font-size: 13px; margin-top: 6px; }
+  img { width: 420px; height: 420px; image-rendering: pixelated; border: 1px solid #2c3442; background: #000; display: block; }
+  #status { color: #f0b34a; min-height: 20px; font-size: 14px; }
+  .tag { font-size: 12px; padding: 2px 8px; border-radius: 10px; background: #5a3d0a; color: #f0b34a; }
+</style>
+</head>
+<body>
+<h1>🔭 SPHEREx Blink <span id="src" class="tag" hidden></span></h1>
+<div class="sub">Escribe una coordenada y mira qué se mueve entre las visitas de SPHEREx.</div>
+
+<div class="row">
+  <input id="name" type="text" placeholder="Nombre (ej. Barnard's Star)">
+  <button id="btnResolve">Buscar nombre</button>
+  <span>o</span>
+  <input id="ra" type="text" placeholder="RA (grados)">
+  <input id="dec" type="text" placeholder="Dec (grados)">
+  <label>Campo <select id="fov">
+    <option value="0.03">1.8′</option><option value="0.05" selected>3′</option>
+    <option value="0.1">6′</option><option value="0.2">12′</option>
+  </select></label>
+  <button id="btnGo" class="on">Ver</button>
+</div>
+<div class="row">
+  <button id="btnPlay">⏸ Pausa</button>
+  <label>Velocidad <input id="speed" type="range" min="100" max="1500" value="600" step="100" style="direction: rtl"></label>
+  <span id="status"></span>
+</div>
+
+<div id="view" hidden>
+  <figure><img id="frame" alt="Imagen de la época"><figcaption id="cap"></figcaption></figure>
+  <figure><img id="diff" alt="Imagen diferencia"><figcaption>Diferencia: última época − primera. Blanco = llegó, negro = se fue.</figcaption></figure>
+</div>
+
+<script>
+const $ = id => document.getElementById(id);
+let data = null, i = 0, timer = null, playing = true;
+
+function show() {
+  if (!data) return;
+  const e = data.epochs[i];
+  $("frame").src = e.png;
+  $("cap").textContent = `Época ${i + 1} de ${data.epochs.length} · ${e.date} · ${e.n_exp} exposiciones`;
+}
+function tick() { i = (i + 1) % data.epochs.length; show(); }
+function restart() {
+  clearInterval(timer);
+  if (playing && data) timer = setInterval(tick, +$("speed").value);
+}
+
+async function load() {
+  const ra = $("ra").value.trim(), dec = $("dec").value.trim(), fov = $("fov").value;
+  if (!ra || !dec) { $("status").textContent = "Falta RA o Dec."; return; }
+  $("status").textContent = "Cargando…";
+  history.replaceState(null, "", `?ra=${ra}&dec=${dec}&fov=${fov}`);   // coordenadas en la URL
+  try {
+    const r = await fetch(`/frames?ra=${ra}&dec=${dec}&fov=${fov}`);
+    if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+    data = await r.json(); i = 0;
+    $("view").hidden = false;
+    $("diff").src = data.diff || "";
+    $("src").hidden = data.source !== "fake";
+    $("src").textContent = "datos sintéticos de prueba";
+    $("status").textContent = "";
+    show(); restart();
+  } catch (err) { $("status").textContent = "Error: " + err.message; }
+}
+
+$("btnGo").onclick = load;
+$("btnResolve").onclick = async () => {
+  const name = $("name").value.trim(); if (!name) return;
+  $("status").textContent = "Buscando…";
+  const r = await fetch(`/resolve?name=${encodeURIComponent(name)}`);
+  if (!r.ok) { $("status").textContent = "No encontré ese nombre."; return; }
+  const j = await r.json();
+  $("ra").value = j.ra.toFixed(5); $("dec").value = j.dec.toFixed(5);
+  load();
+};
+$("btnPlay").onclick = () => { playing = !playing; $("btnPlay").textContent = playing ? "⏸ Pausa" : "▶ Play"; restart(); };
+$("speed").oninput = restart;
+
+// Leer ?ra=&dec=&fov= de la URL al abrir
+const q = new URLSearchParams(location.search);
+if (q.get("ra") && q.get("dec")) {
+  $("ra").value = q.get("ra"); $("dec").value = q.get("dec");
+  if (q.get("fov")) $("fov").value = q.get("fov");
+  load();
+}
+</script>
+</body>
+</html>
