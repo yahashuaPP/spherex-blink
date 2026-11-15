@@ -128,6 +128,23 @@ def _from_index(ra, dec, fov_deg, tol_deg=0.05):
         key=lambda e: e["t"])
 
 
+def _from_index_offline(ra, dec, tol_deg=0.05):
+    """Lo que ya se sabe de una posición SIN usar la red (para el reporte de estado)."""
+    import json
+    from pathlib import Path
+
+    idx = Path(__file__).resolve().parent / "index"
+    files = {}
+    here = SkyCoord(ra * u.deg, dec * u.deg)
+    for f in sorted(idx.glob("*.json")):
+        if f.name.startswith("_"):
+            continue
+        d = json.loads(f.read_text())
+        if here.separation(SkyCoord(d["ra"] * u.deg, d["dec"] * u.deg)).deg < tol_deg:
+            files.update({x["key"]: x for x in d["files"]})
+    return list(files.values())
+
+
 def _run_query(tap, query, ra, dec):
     """IRSA a veces devuelve 502 si el query síncrono tarda. Se intenta en orden:
     1) TAP asíncrono (sin límite de tiempo del proxy), 2) TAP síncrono, 3) SIA2."""

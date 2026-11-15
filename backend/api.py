@@ -79,50 +79,68 @@ def resolve(name: str):
     return {"name": name, "ra": ra, "dec": dec}
 
 
+PRE = source.ROOT / "precomputed"
+
+
+def pre_path(ra: float, dec: float, fov: float):
+    return PRE / f"{ra:.4f}_{dec:.4f}_{fov}.json"
+
+
+def compute(ra: float, dec: float, fov: float) -> dict:
+    """Todo el cálculo para una posición: datos -> ciencia -> respuesta lista para la web."""
+    exps = source.get_exposures(ra, dec, fov)
+    if not exps:
+        raise LookupError("SPHEREx no tiene exposiciones en esa posición.")
+    res = build_frames(exps, ra, dec, fov)
+    if not res["epochs"]:
+        raise LookupError("Ninguna exposición cubre esa posición.")
+
+    try:        # posición exposición por exposición (funciona también con estrellas saturadas)
+        astro = astrometry.measure(exps, ra, dec, sc.match_known_target(ra, dec))
+    except Exception as err:
+        print("astrometry falló:", repr(err))
+        astro = None
+    saturated = bool(astro and astro["saturated"])
+    if astro:
+        astro["png"] = png(astro.pop("png_b64"))
+
+    return clean({
+        "ra": ra, "dec": dec, "fov": fov, "source": source.SOURCE, "n_exposures": len(exps),
+        "epochs": [{
+            "date": Time(e["t_mean"], format="mjd").iso[:10],
+            "n_exp": e["n_exp"],
+            "png": png(b),
+        } for e, b in zip(res["epochs"], res["png_epochs_b64"])],
+        "diff": png(res.get("png_diff_b64")),
+        "sum": png(res.get("png_sum_b64")),
+        "rgb": png(res.get("png_rgb_b64")),
+        # Con el núcleo saturado la fotometría de apertura no es fiable: no se muestra.
+        "spectrum": None if saturated else png(res.get("png_spectrum_b64")),
+        "saturated": saturated,
+        "astro": astro,
+        "flags": png(res.get("png_flags_b64")),
+        "detectors": {d: png(b) for d, b in (res.get("png_detectors_b64") or {}).items()},
+        "bands": bands(res),
+        "validation": res.get("validation"),
+        "flags_summary": res.get("flags_summary"),
+    })
+
+
 @app.get("/frames")
 def frames(ra: float, dec: float, fov: float = 0.1):
     key = (round(ra, 5), round(dec, 5), fov)
     if key not in _cache:
-        try:
-            exps = source.get_exposures(ra, dec, fov)
-        except Exception as err:
-            raise HTTPException(502, f"No pude obtener datos ({source.SOURCE}): {err}")
-        if not exps:
-            raise HTTPException(404, "SPHEREx no tiene exposiciones en esa posición.")
-
-        res = build_frames(exps, ra, dec, fov)
-        if not res["epochs"]:
-            raise HTTPException(404, "Ninguna exposición cubre esa posición.")
-
-        try:        # posición exposición por exposición (funciona también con estrellas saturadas)
-            astro = astrometry.measure(exps, ra, dec, sc.match_known_target(ra, dec))
-        except Exception as err:
-            print("astrometry falló:", repr(err))
-            astro = None
-        saturated = bool(astro and astro["saturated"])
-        if astro:
-            astro["png"] = png(astro.pop("png_b64"))
-
-        _cache[key] = clean({
-            "ra": ra, "dec": dec, "fov": fov, "source": source.SOURCE,
-            "epochs": [{
-                "date": Time(e["t_mean"], format="mjd").iso[:10],
-                "n_exp": e["n_exp"],
-                "png": png(b),
-            } for e, b in zip(res["epochs"], res["png_epochs_b64"])],
-            "diff": png(res.get("png_diff_b64")),
-            "sum": png(res.get("png_sum_b64")),
-            "rgb": png(res.get("png_rgb_b64")),
-            # Con el núcleo saturado la fotometría de apertura no es fiable: no se muestra.
-            "spectrum": None if saturated else png(res.get("png_spectrum_b64")),
-            "saturated": saturated,
-            "astro": astro,
-            "flags": png(res.get("png_flags_b64")),
-            "detectors": {d: png(b) for d, b in (res.get("png_detectors_b64") or {}).items()},
-            "bands": bands(res),
-            "validation": res.get("validation"),
-            "flags_summary": res.get("flags_summary"),
-        })
+        pre = pre_path(ra, dec, fov)
+        if pre.exists():                       # resultado ya preparado por pipeline.py: instantáneo
+            import json
+            _cache[key] = json.loads(pre.read_text())
+        else:
+            try:
+                _cache[key] = compute(ra, dec, fov)
+            except LookupError as err:
+                raise HTTPException(404, str(err))
+            except Exception as err:
+                raise HTTPException(502, f"No pude obtener datos ({source.SOURCE}): {err}")
     return _cache[key]
 
 
