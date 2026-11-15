@@ -15,7 +15,7 @@ from astropy.io import fits
 from astropy.wcs import WCS
 
 from query import find_exposures, resolve
-from s3_cutout import make_cutout, s3_reader
+from s3_cutout import is_valid, make_cutout, s3_reader
 
 CACHE = Path(__file__).resolve().parent.parent / "cache"
 MAX_PARALLEL = 12     # archivos simultáneos
@@ -73,7 +73,7 @@ async def download_all(exposures, ra, dec, fov, on_done=None) -> list[dict]:
             except asyncio.QueueEmpty:
                 return
             path = cache_path(e, ra, dec, fov)
-            if not path.exists():
+            if not path.exists() or not is_valid(str(path)):      # también rehace recortes dañados
                 try:
                     if e.get("key"):      # recorte propio desde Amazon S3 (no depende de IRSA)
                         data = await make_cutout(s3_reader(client, e["key"]), ra, dec, fov)
@@ -117,7 +117,13 @@ def get_exposures(ra: float, dec: float, fov: float = 0.05) -> list[dict]:
     """Todo junto: buscar -> bajar -> leer. Esto es lo que usa science.py."""
     exps = find_exposures(ra, dec, fov)
     bajadas = asyncio.run(download_all(exps, ra, dec, fov))
-    return [load_exposure(e) for e in bajadas]
+    out = []
+    for e in bajadas:
+        try:
+            out.append(load_exposure(e))
+        except Exception as err:      # un archivo raro no tumba toda la corrida
+            print(f"  no pude leer {Path(e['path']).name}: {err}")
+    return out
 
 
 if __name__ == "__main__":

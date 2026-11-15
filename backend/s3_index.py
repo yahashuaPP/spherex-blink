@@ -39,7 +39,8 @@ HEADER_BYTES = 28800              # cabecera primaria + cabecera de IMAGE (compr
 PARALLEL = 48
 NPIX = 2040
 MAX_WEEKS = 30                    # tope de medias semanas a revisar por objeto
-ELONG_TOL = 14.0                  # grados de margen alrededor de 90° del Sol
+ELONG_TOL = 24.0                  # grados de margen alrededor de 90° del Sol
+LIKELY_OFFSET = 13.0              # apartamiento más probable (se revisa primero)
 NAMES = ["Barnard's Star", "RW Aurigae", "Epsilon Indi B", "WISE 0855", "R Draconis"]
 
 
@@ -59,21 +60,11 @@ def sun_lon(day: dt.date) -> float:
     return float((280.460 + 0.9856474 * n + 1.915 * np.sin(g) + 0.020 * np.sin(2 * g)) % 360)
 
 
-def visible_days(ra, dec, start=dt.date(2025, 4, 20), end=None) -> set:
-    """Días en que SPHEREx puede ver el objeto: apunta a ~90° del Sol.
-
-    Margen de 14°: una exposición real conocida (2025-04-28) estaba a 80.7° del Sol.
-    """
-    end = end or dt.date.today()
+def elong_offset(ra, dec, day: dt.date) -> float:
+    """Cuántos grados se aparta el objeto de estar a 90° del Sol ese día."""
     lon, lat = ecliptic(ra, dec)
-    days = set()
-    d = start
-    while d <= end:
-        c = np.cos(np.radians(lat)) * np.cos(np.radians(sun_lon(d) - lon))
-        if abs(np.degrees(np.arccos(c)) - 90.0) < ELONG_TOL:
-            days.add(d)
-        d += dt.timedelta(days=1)
-    return days
+    c = np.cos(np.radians(lat)) * np.cos(np.radians(sun_lon(day) - lon))
+    return abs(float(np.degrees(np.arccos(c))) - 90.0)
 
 
 def sep_deg(ra1, dec1, ra2, dec2) -> float:
@@ -162,12 +153,16 @@ def slug(name):
 async def index_target(client, sem, name, ra, dec, weeks, scout):
     path = INDEX / f"{slug(name)}.json"
     idx = load_json(path, {"name": name, "ra": ra, "dec": dec, "weeks_done": [], "files": []})
-    days = visible_days(ra, dec)
-    wanted = [w for w in weeks
-              if any(week_monday(w.split("/")[-2]) + dt.timedelta(days=i) in days for i in range(7))]
-    if len(wanted) > MAX_WEEKS:      # objetos cerca del polo eclíptico se ven casi siempre: muestreo
-        paso = len(wanted) / MAX_WEEKS
-        wanted = [wanted[int(i * paso)] for i in range(MAX_WEEKS)]
+    # SPHEREx barre un círculo a ~75-105° del Sol. Medido en datos reales: una exposición
+    # a 80.7° del Sol, y a 90° exactos el barrido pasaba a ~15° de Barnard. Por eso se
+    # revisan primero las medias semanas en que el objeto está a ~13° de la cuadratura.
+    scored = []
+    for w in weeks:
+        lunes = week_monday(w.split("/")[-2])
+        offs = [elong_offset(ra, dec, lunes + dt.timedelta(days=i)) for i in range(7)]
+        if min(offs) < ELONG_TOL:
+            scored.append((min(abs(o - LIKELY_OFFSET) for o in offs), w))
+    wanted = [w for _, w in sorted(scored)][:MAX_WEEKS]
     wanted = [w for w in wanted if w not in idx["weeks_done"]]
     print(f"\n=== {name}  RA={ra:.4f} Dec={dec:.4f} | {len(wanted)} medias semanas por revisar, "
           f"{len(idx['files'])} archivos ya encontrados")
@@ -208,8 +203,9 @@ async def index_target(client, sem, name, ra, dec, weeks, scout):
         idx["files"].sort(key=lambda f: f["t"])
         path.write_text(json.dumps(idx, indent=1))
         SCOUT_FILE.write_text(json.dumps(scout))
-        print(f"  {w.split('/')[0]} {w.split('/')[-2]}: {len(files)} exposiciones, "
-              f"{len(cerca)} cercanas, {len(hits)} archivos cubren el objeto (total {len(idx['files'])})")
+        dmin = min((sep_deg(scout[o][0], scout[o][1], ra, dec) for o in files if o in scout), default=999)
+        print(f"  {w.split('/')[0]} {w.split('/')[-2]}: {len(files)} exposiciones, la más cercana a {dmin:.1f}°, "
+              f"{len(hits)} archivos cubren el objeto (total {len(idx['files'])})", flush=True)
     return idx
 
 

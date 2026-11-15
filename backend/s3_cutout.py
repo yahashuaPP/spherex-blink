@@ -32,6 +32,8 @@ async def _read_header(read, offset: int):
     raw, size = b"", 28800
     while True:
         raw = await read(offset, size)
+        if not raw:
+            raise EOFError
         for i in range(0, len(raw) - 79, 80):
             if raw[i:i + 8] == b"END     ":
                 hlen = _pad(i + 80)
@@ -59,13 +61,39 @@ async def make_cutout(read, ra: float, dec: float, fov_deg: float) -> bytes:
     while True:
         try:
             h, hlen = await _read_header(read, offset)
-        except Exception:
-            break                                       # fin del archivo
+        except EOFError:
+            break                                       # fin del archivo (un error de red NO se traga)
         name = str(h.get("EXTNAME", "")).strip().upper()
         dlen = _data_bytes(h)
         dstart = offset + hlen
 
-        if name in CUT_HDUS:
+        comprimido = name in CUT_HDUS and str(h.get("XTENSION", "")).strip() == "BINTABLE"
+        if comprimido:
+            # La entrega qr3 guarda FLAGS como imagen comprimida (tabla binaria). Se baja el HDU
+            # entero (comprime mucho), se descomprime con astropy y se recorta en memoria.
+            import io
+            blob = await read(offset, hlen + dlen)
+            with fits.open(io.BytesIO(out[0] + blob)) as hl:
+                full = np.asarray(hl[1].data)
+                hc = hl[1].header.copy()
+            ny, nx = full.shape
+            if window is None:
+                x, y = WCS(hc).all_world2pix(ra, dec, 0, quiet=True)
+                if not (0 <= x < nx and 0 <= y < ny):
+                    raise ValueError("La posición cae fuera de esta imagen")
+                x0 = int(np.clip(round(float(x)) - npix // 2, 0, max(nx - npix, 0)))
+                y0 = int(np.clip(round(float(y)) - npix // 2, 0, max(ny - npix, 0)))
+                window = (x0, y0, min(x0 + npix, nx), min(y0 + npix, ny))
+            x0, y0, x1, y1 = window
+            for alt in [""] + [chr(c) for c in range(65, 91)]:
+                for ax, shift in (("1", x0), ("2", y0)):
+                    if f"CRPIX{ax}{alt}" in hc:
+                        hc[f"CRPIX{ax}{alt}"] = hc[f"CRPIX{ax}{alt}"] - shift
+            buf = io.BytesIO()
+            fits.HDUList([fits.PrimaryHDU(), fits.ImageHDU(np.ascontiguousarray(full[y0:y1, x0:x1]),
+                                                           header=hc, name=name)]).writeto(buf)
+            out.append(buf.getvalue()[BLOCK:])
+        elif name in CUT_HDUS:
             nx, ny = h["NAXIS1"], h["NAXIS2"]
             if window is None:                          # se decide una vez, con el WCS de IMAGE
                 x, y = WCS(h).all_world2pix(ra, dec, 0, quiet=True)
@@ -95,7 +123,21 @@ async def make_cutout(read, ra: float, dec: float, fov_deg: float) -> bytes:
 
     if window is None:
         raise RuntimeError("El archivo no tiene extensión IMAGE")
-    return b"".join(out)
+    data = b"".join(out)
+    if not is_valid(data):
+        raise RuntimeError("El recorte quedó incompleto")
+    return data
+
+
+def is_valid(src) -> bool:
+    """¿Es un recorte completo? `src` puede ser bytes o la ruta de un archivo."""
+    import io
+    try:
+        with fits.open(io.BytesIO(src) if isinstance(src, bytes) else src) as h:
+            forma = h["IMAGE"].data.shape
+            return len(forma) == 2 and h["FLAGS"].data.shape == forma and h["VARIANCE"].data.shape == forma
+    except Exception:
+        return False
 
 
 def s3_reader(client, key: str, sem=None, tries: int = 4):
