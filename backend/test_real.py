@@ -37,12 +37,12 @@ with fits.open(OUT) as h:
     print("\nBUNIT:", hdr.get("BUNIT"), "| DETECTOR:", hdr.get("DETECTOR"),
           "| MJD-AVG:", hdr.get("MJD-AVG"), "| MJD-OBS:", hdr.get("MJD-OBS"))
     print("Claves de tiempo/WCS-W:", [k for k in hdr if "MJD" in k or "DATE" in k or k.endswith("W")][:20])
-    img, flags = h["IMAGE"].data, h["FLAGS"].data
+    img, flags = h["IMAGE"].data, h["FLAGS"].data.astype("uint32")
     print("\nimage:", img.shape, img.dtype, "| flags:", flags.dtype)
 
     print("\nBits de FLAGS (porcentaje de píxeles con cada bit):")
     for bit in range(32):
-        frac = np.mean((flags.astype(np.int64) >> bit) & 1)
+        frac = np.mean((flags >> bit) & 1)
         if frac > 0:
             print(f"  bit {bit:2d}: {100 * frac:6.2f} %")
     iy, ix = np.unravel_index(np.nanargmax(img), img.shape)

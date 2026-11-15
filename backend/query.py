@@ -67,6 +67,12 @@ def find_exposures(ra: float, dec: float, fov_deg: float = 0.05) -> list[dict]:
     Cada elemento: {"url", "t" (MJD), "detector" (1..6), "epoch" (0, 1, 2...)}
     La url ya incluye el recorte (?center=..&size=..).
     """
+    local = _from_index(ra, dec, fov_deg)
+    if local:
+        print(f"Usando el índice local ({len(local)} exposiciones); no hace falta el buscador de IRSA.")
+        assign_epochs(local)
+        return local
+
     tap = pyvo.dal.TAPService(TAP_URL)
     query = f"""
     SELECT 'https://irsa.ipac.caltech.edu/' || a.uri AS uri,
@@ -91,6 +97,35 @@ def find_exposures(ra: float, dec: float, fov_deg: float = 0.05) -> list[dict]:
         })
     assign_epochs(out)
     return out
+
+
+def _from_index(ra, dec, fov_deg, tol_deg=0.05):
+    """Exposiciones desde nuestros índices propios (no usan el buscador de IRSA):
+    - backend/index/<objeto>.json  -> lo que genera s3_index.py
+    - backend/index/sky/           -> el índice de todo el cielo (sky_index.py)
+    """
+    import json
+    from pathlib import Path
+
+    files = {}
+    here = SkyCoord(ra * u.deg, dec * u.deg)
+    for f in sorted((Path(__file__).resolve().parent / "index").glob("*.json")):
+        if f.name.startswith(("_", "pos_")):
+            continue
+        d = json.loads(f.read_text())
+        if here.separation(SkyCoord(d["ra"] * u.deg, d["dec"] * u.deg)).deg < tol_deg:
+            files.update({x["key"]: x for x in d["files"]})
+    try:
+        import sky_index
+        files.update({x["key"]: x for x in sky_index.find(ra, dec)})
+    except Exception as err:
+        print(f"  (índice de todo el cielo no disponible: {type(err).__name__}: {err})")
+    if not files:
+        return None
+    return sorted(
+        ({"url": f"https://nasa-irsa-spherex.s3.amazonaws.com/{x['key']}#{ra},{dec},{fov_deg}",
+          "key": x["key"], "t": x["t"], "detector": x["detector"]} for x in files.values()),
+        key=lambda e: e["t"])
 
 
 def _run_query(tap, query, ra, dec):

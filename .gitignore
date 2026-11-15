@@ -18,3 +18,6 @@ Thumbs.db
 
 # Secretos
 .env
+
+# Caché del buscador propio (se regenera)
+backend/index/_scout.json

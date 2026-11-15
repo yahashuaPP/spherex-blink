@@ -49,6 +49,7 @@
   <button data-n="R Draconis">R Draconis</button>
 </div>
 <div class="row">
+  <label>Banda <select id="band"></select></label>
   <button id="btnPlay">⏸ Pausa</button>
   <label>Velocidad <input id="speed" type="range" min="100" max="1500" value="600" step="100" style="direction: rtl"></label>
   <span id="status"></span>
@@ -57,14 +58,14 @@
 <div id="view" hidden>
   <div class="panels">
     <figure><img class="sky" id="frame" alt="Imagen de la época"><figcaption id="cap"></figcaption></figure>
-    <figure><img class="sky" id="diff" alt="Imagen diferencia"><figcaption>Resta: última época − primera. Un objeto que se mueve deja un par de manchas de colores opuestos; uno que cambia de brillo deja una sola.</figcaption></figure>
+    <figure><img class="sky" id="diff" alt="Imagen diferencia"><figcaption>Resta: última época − primera, en la misma banda. Un objeto que se mueve deja un par de manchas de colores opuestos; uno que cambia de brillo deja una sola. Dentro de un detector la longitud de onda todavía varía un poco entre exposiciones.</figcaption></figure>
     <figure><img class="sky" id="sum" alt="Suma de épocas"><figcaption>Suma de todas las épocas: más señal, y lo que se mueve se ve alargado.</figcaption></figure>
   </div>
 
-  <h2>Movimiento medido</h2>
-  <table id="val"></table>
+  <h2>Movimiento medido (posición ajustada en cada exposición)</h2>
+  <div class="panels"><table id="val"></table><img class="wide" id="astroPlot" alt="Posición por exposición" style="max-width:460px"></div>
 
-  <h2>Espectro de la fuente central</h2>
+  <h2 id="specTitle">Espectro de la fuente central</h2>
   <img class="wide" id="spec" alt="Espectro">
 
   <h2>Por detector (6 bandas del infrarrojo) y color compuesto</h2>
@@ -75,13 +76,21 @@
 const $ = id => document.getElementById(id);
 let data = null, i = 0, timer = null, playing = true;
 
-function show() {
-  if (!data) return;
-  const e = data.epochs[i];
-  $("frame").src = e.png;
-  $("cap").textContent = `Época ${i + 1} de ${data.epochs.length} · ${e.date} · ${e.n_exp} exposiciones`;
+let cur = null;   // épocas y resta de la banda elegida
+function pickBand() {
+  const b = $("band").value;
+  cur = b === "all" ? { epochs: data.epochs, diff: data.diff } : data.bands[b];
+  $("diff").src = cur.diff || "";
+  i = 0; show();
 }
-function tick() { i = (i + 1) % data.epochs.length; show(); }
+function show() {
+  if (!data || !cur) return;
+  const e = cur.epochs[i % cur.epochs.length];
+  $("frame").src = e.png;
+  $("cap").textContent = `Época ${(i % cur.epochs.length) + 1} de ${cur.epochs.length} · ${e.date}` +
+    (e.n_exp ? ` · ${e.n_exp} exposiciones` : "");
+}
+function tick() { i = (i + 1) % cur.epochs.length; show(); }
 function restart() {
   clearInterval(timer);
   if (playing && data) timer = setInterval(tick, +$("speed").value);
@@ -91,27 +100,52 @@ function row(a, b) { return `<tr><td>${a}</td><td>${b}</td></tr>`; }
 function render() {
   $("view").hidden = false;
   $("banner").hidden = data.source !== "fake";
-  $("diff").src = data.diff || ""; $("sum").src = data.sum || "";
+  $("sum").src = data.sum || "";
+  // Selector de banda: por defecto la banda con más épocas y, entre esas, la de más señal.
+  const ks = Object.keys(data.bands || {});
+  ks.sort((a, b) => data.bands[b].epochs.length - data.bands[a].epochs.length || data.bands[b].snr - data.bands[a].snr);
+  const best = ks[0];
+  $("band").innerHTML = ks.slice().sort().map(k => `<option value="${k}">${data.bands[k].label}</option>`).join("") +
+    `<option value="all">Todas las bandas mezcladas</option>`;
+  $("band").value = best || "all";
+  pickBand();
   $("spec").src = data.spectrum || ""; $("spec").hidden = !data.spectrum;
 
-  const v = data.validation; let h = "";
-  if (v) {
+  const A = data.astro, v = data.validation; let h = "";
+  const f = (x, n = 2) => (x >= 0 ? "+" : "") + x.toFixed(n);
+  if (A && A.epochs.length) {
+    for (const e of A.epochs)
+      h += row(`Época ${e.date} (${e.n} exposiciones)`,
+               `ΔRA ${f(e.dra)}″ ± ${e.dra_err.toFixed(2)} · ΔDec ${f(e.ddec)}″ ± ${e.ddec_err.toFixed(2)}`);
+    if (A.shift) {
+      const s = A.shift;
+      h += row(`<b>Desplazamiento medido</b> (${s.from} → ${s.to})`,
+               `<b>ΔRA ${f(s.ra)}″ ± ${s.ra_err.toFixed(2)} · ΔDec ${f(s.dec)}″ ± ${s.dec_err.toFixed(2)}</b> · total ${s.total.toFixed(2)}″`);
+      if (A.expected) {
+        const x = A.expected;
+        h += row("Esperado por catálogo", `ΔRA ${f(x.ra)}″ · ΔDec ${f(x.dec)}″ · total ${x.total.toFixed(2)}″`);
+        h += row("&nbsp;&nbsp;movimiento propio", `ΔRA ${f(x.pm_ra)}″ · ΔDec ${f(x.pm_dec)}″`);
+        h += row("&nbsp;&nbsp;paralaje", `ΔRA ${f(x.par_ra)}″ · ΔDec ${f(x.par_dec)}″`);
+      }
+      if (!s.same_orientation)
+        h += row("Nota", "El detector gira 180° entre visitas separadas seis meses; con estrellas saturadas eso puede meter un error sistemático que no está en las barras de error.");
+    } else h += row("—", "Se necesitan al menos dos épocas con tres exposiciones útiles.");
+    if (A.saturated) h += row("Aviso", "La fuente satura el detector: la posición se mide con las alas de la estrella y no se muestra espectro.");
+  } else if (v) {
     h += row("Tiempo entre épocas", `${v.dt_days} días`);
     h += row("Desplazamiento medido", `${v.shift_arcsec_measured}″ (${v.shift_px} px)`);
     h += row("Velocidad medida", `${v.pm_total_measured_arcsec_yr}″/año`);
-    if (v.pm_total_expected_arcsec_yr != null) {
-      h += row("Velocidad de catálogo", `${v.pm_total_expected_arcsec_yr}″/año`);
-      h += row("Diferencia en el desplazamiento", `${v.error_arcsec}″`);
-    }
   }
-  $("val").innerHTML = h || row("—", "Se necesitan al menos dos épocas.");
+  $("val").innerHTML = h || row("—", "No hay una fuente clara en el centro para medir.");
+  $("astroPlot").src = (A && A.png) || ""; $("astroPlot").hidden = !(A && A.png);
+  $("specTitle").hidden = $("spec").hidden;
 
   let d = "";
   for (const k of Object.keys(data.detectors || {}).sort())
     d += `<figure><img class="small" src="${data.detectors[k]}" alt="Detector ${k}"><figcaption>Detector ${k}</figcaption></figure>`;
   if (data.rgb) d += `<figure><img class="small" src="${data.rgb}" alt="Color compuesto"><figcaption>Color compuesto</figcaption></figure>`;
   $("dets").innerHTML = d;
-  i = 0; show(); restart();
+  restart();
 }
 
 async function load() {
@@ -143,6 +177,7 @@ $("btnResolve").onclick = () => { const n = $("name").value.trim(); if (n) byNam
 document.querySelectorAll(".chips button").forEach(b => b.onclick = () => byName(b.dataset.n));
 $("btnPlay").onclick = () => { playing = !playing; $("btnPlay").textContent = playing ? "⏸ Pausa" : "▶ Play"; restart(); };
 $("speed").oninput = restart;
+$("band").onchange = pickBand;
 
 // Leer ?ra=&dec=&fov= de la URL al abrir
 const q = new URLSearchParams(location.search);

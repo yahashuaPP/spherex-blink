@@ -15,10 +15,11 @@ from astropy.io import fits
 from astropy.wcs import WCS
 
 from query import find_exposures, resolve
+from s3_cutout import make_cutout, s3_reader
 
 CACHE = Path(__file__).resolve().parent.parent / "cache"
-MAX_PARALLEL = 8      # descargas simultáneas (no subir mucho: IRSA puede bloquear)
-MAX_PER_EPOCH = 30    # tope de exposiciones por época
+MAX_PARALLEL = 12     # archivos simultáneos
+MAX_PER_EPOCH = 36    # tope por época: 6 por detector (cada recorte propio pesa ~2 MB)
 
 
 def prioritize(exposures: list[dict], max_per_epoch: int = MAX_PER_EPOCH) -> list[tuple]:
@@ -74,16 +75,21 @@ async def download_all(exposures, ra, dec, fov, on_done=None) -> list[dict]:
             path = cache_path(e, ra, dec, fov)
             if not path.exists():
                 try:
-                    r = await client.get(e["url"])
-                    r.raise_for_status()
+                    if e.get("key"):      # recorte propio desde Amazon S3 (no depende de IRSA)
+                        data = await make_cutout(s3_reader(client, e["key"]), ra, dec, fov)
+                    else:                 # recorte hecho por IRSA
+                        r = await client.get(e["url"])
+                        r.raise_for_status()
+                        data = r.content
                     tmp = path.with_suffix(".part")
-                    tmp.write_bytes(r.content)
-                    tmp.rename(path)
+                    tmp.write_bytes(data)
+                    tmp.replace(path)
                 except Exception as err:  # una que falle no tumba el resto
                     print(f"  falló {e['url'][-60:]}: {err}")
                     continue
             e["path"] = str(path)
             listas.append(e)
+            print(f"  {len(listas)} listas (época {e['epoch']}, detector {e['detector']})", flush=True)
             if on_done:
                 on_done(e)
 

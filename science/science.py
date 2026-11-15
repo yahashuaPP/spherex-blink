@@ -43,7 +43,15 @@ SPHEREX_PIXEL_SCALE_DEG = SPHEREX_PIXEL_SCALE_ARCSEC / 3600.0
 STERADIANS_PER_DEG2 = (np.pi / 180.0) ** 2
 NOMINAL_PSF_SIGMA_PX = 1.25
 
-DEFAULT_BAD_FLAG_MASK = 0xFFFFFFFF
+# Bits de FLAGS que invalidan un pixel. Decidido mirando datos REALES de Barnard (22 exposiciones):
+#   bit 21: encendido en el 100 % de los pixeles ("aqui hay una fuente") -> NO se enmascara.
+#   bits 0 y 2: se encienden en un anillo de ~30 pixeles alrededor de una estrella brillante,
+#               con valores razonables -> NO se enmascaran (si no, la estrella queda como un hueco).
+#   bit 1 (OVERFLOW): nucleo saturado; valor poco fiable pero se muestra. astrometry.py si lo excluye.
+#   bits 7, 12, 26: informativos.
+# Solo se descartan los bits de pixel defectuoso. Nombres de los bits: VERIFICAR en el manual.
+_BAD_BITS = (6, 9, 10, 11, 14, 15, 17, 19)
+DEFAULT_BAD_FLAG_MASK = sum(1 << b for b in _BAD_BITS)
 
 DETECTOR_LVF_RANGES_UM: Dict[int, Tuple[float, float]] = {
     1: (0.75, 1.11),
@@ -340,7 +348,7 @@ def reproject_exposure(
         ra_2d, dec_2d = sky_grid_ra_dec
 
     wcs_in: WCS = exp["wcs"]
-    x_in, y_in = wcs_in.wcs_world2pix(ra_2d, dec_2d, 0)
+    x_in, y_in = wcs_in.all_world2pix(ra_2d, dec_2d, 0, quiet=True)  # all_*: incluye la distorsion SIP de SPHEREx (~9 px)
     coords = np.array([y_in, x_in], dtype=np.float64)
 
     # Interpolacion bicubica (order=3) libre de NaNs para la imagen
@@ -711,7 +719,7 @@ def compute_aperture_spectrum(
         else:
             ra_t, dec_t = float(ra_deg), float(dec_deg)
 
-        x_src, y_src = wcs_exp.wcs_world2pix(ra_t, dec_t, 0)
+        x_src, y_src = wcs_exp.all_world2pix(ra_t, dec_t, 0, quiet=True)
         x_src, y_src = float(x_src), float(y_src)
         ny, nx = img.shape
 
