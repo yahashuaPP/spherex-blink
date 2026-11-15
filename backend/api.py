@@ -134,6 +134,11 @@ def frames(ra: float, dec: float, fov: float = 0.1):
         if pre.exists():                       # resultado ya preparado por pipeline.py: instantáneo
             import json
             _cache[key] = json.loads(pre.read_text())
+        elif source.SOURCE == "demo":            # demo pública: solo lo ya preparado
+            raise HTTPException(404, "Esta demo pública solo tiene los cinco objetos de prueba, con campo de 6′. "
+                                     "Para cualquier otra coordenada, corre la herramienta en tu computadora "
+                                     "(instrucciones en el repositorio). / This public demo only serves the five "
+                                     "test targets at a 6′ field; run it locally for any other coordinate.")
         else:
             try:
                 _cache[key] = compute(ra, dec, fov)

@@ -172,13 +172,13 @@ def _plot(P, epochs, out, target) -> str:
         a, ex = epochs[0], out["expected"]
         ax.annotate("", xy=(a["dra"] + ex["ra"], a["ddec"] + ex["dec"]), xytext=(a["dra"], a["ddec"]),
                     arrowprops=dict(arrowstyle="->", color="#ffffff", lw=1.6, ls="--"))
-        ax.plot([], [], "--", color="#ffffff", label="esperado (mov. propio + paralaje)")
+        ax.plot([], [], "--", color="#ffffff", label="expected (proper motion + parallax)")
     ax.invert_xaxis()                                   # Este a la izquierda, como en el cielo
     ax.set_aspect("equal", adjustable="datalim")
-    ax.set_xlabel('ΔRA·cos(Dec) ["]   (Este ←)', color="#c9d1d9")
-    ax.set_ylabel('ΔDec ["]   (Norte ↑)', color="#c9d1d9")
-    nombre = (target or {}).get("name", "Fuente central")
-    ax.set_title(f"{nombre}: posición en cada exposición\n(1 píxel de SPHEREx = {PIX_ARCSEC}\")",
+    ax.set_xlabel('ΔRA·cos(Dec) ["]   (East ←)', color="#c9d1d9")
+    ax.set_ylabel('ΔDec ["]   (North ↑)', color="#c9d1d9")
+    nombre = (target or {}).get("name", "Central source")
+    ax.set_title(f"{nombre}: position in each exposure\n(1 SPHEREx pixel = {PIX_ARCSEC}\")",
                  fontsize=10, weight="bold", color="#ffffff")
     ax.grid(color="#21262d", ls="--", lw=0.7)
     ax.legend(fontsize=7.5, facecolor="#0d1117", edgecolor="#30363d", loc="best")

@@ -1,7 +1,8 @@
 """Interruptor de la fuente de datos. El resto del código solo usa este archivo.
 
     SPHEREX_SOURCE=fake   -> datos SINTÉTICOS (por defecto)
-    SPHEREX_SOURCE=irsa   -> datos reales: SIMBAD (nombres) + IRSA (imágenes)
+    SPHEREX_SOURCE=irsa   -> datos reales: índices propios + recortes desde Amazon S3
+    SPHEREX_SOURCE=demo   -> demo pública: solo sirve lo ya calculado en precomputed/
 
 En PowerShell:   $env:SPHEREX_SOURCE = "irsa"
 En bash:         export SPHEREX_SOURCE=irsa
