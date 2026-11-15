@@ -101,7 +101,7 @@ def load_exposure(e: dict) -> dict:
             "epoch": e["epoch"],
             "image": hdul["IMAGE"].data.astype("float32"),
             "variance": hdul["VARIANCE"].data.astype("float32"),
-            "flags": hdul["FLAGS"].data,
+            "flags": hdul["FLAGS"].data.astype("uint32"),  # science.py usa máscaras de 32 bits sin signo
             "wcs": WCS(hdul["IMAGE"].header),
             "path": e["path"],
         }

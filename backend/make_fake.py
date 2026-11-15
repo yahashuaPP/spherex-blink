@@ -51,7 +51,7 @@ def fake_exposures(ra0: float = RA0, dec0: float = DEC0, n_per_epoch: int = 12, 
                 dec = dec0 + ddec / 3600
                 x, y = w.all_world2pix(ra, dec, 0)
                 img += flux * np.exp(-((xx - x) ** 2 + (yy - y) ** 2) / (2 * 0.8**2))
-            flags = np.zeros((N, N), dtype="int32")
+            flags = np.zeros((N, N), dtype="uint32")
             malos = rng.integers(0, N, (3, 2))          # unos píxeles malos
             flags[malos[:, 0], malos[:, 1]] = 1
             img[malos[:, 0], malos[:, 1]] += 5000

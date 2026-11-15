@@ -3,6 +3,7 @@ astroquery
 pyvo
 reproject
 numpy
+scipy
 matplotlib
 httpx
 fastapi
