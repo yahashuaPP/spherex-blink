@@ -123,4 +123,4 @@ docs/         figures, and the original work plan (in Spanish)
 
 ## Use of AI
 
-Claude (Anthropic) was used throughout the project. It wrote the web front end, most of the back end (data access, sky index, cutouts, API, orchestrator) and the astrometry module, and helped prepare the slides and this README. The team chose the challenge and the design, including the download priority queue, wrote the base image-processing module, ran every computation on real data, and reviewed the results.
+Claude (Anthropic) was used throughout the project. 
